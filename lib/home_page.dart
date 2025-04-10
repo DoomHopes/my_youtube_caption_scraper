@@ -1,6 +1,12 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:io';
+
+import 'package:excel/excel.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:my_youtube_caption_scraper/list_item.dart';
 import 'package:youtube_caption_scraper/youtube_caption_scraper.dart';
 
 class MyHomePage extends StatefulWidget {
@@ -14,12 +20,12 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   bool isLoading = false;
+  final captionScraper = YouTubeCaptionScraper();
 
   TextEditingController searchEditingController = TextEditingController();
   TextEditingController wordEditingController = TextEditingController();
-  List<SubtitleLine> subtitles = [];
-  List<String> finds = [];
-  List<String> time = [];
+  List<ListItem> finds = [];
+  int errors = 0;
 
   String _formatDuration(Duration duration) {
     return '${duration.inHours}:'
@@ -28,35 +34,77 @@ class _MyHomePageState extends State<MyHomePage> {
         '${duration.inMilliseconds.remainder(60)}';
   }
 
-  Future<void> getSubtitles(String videoUrl) async {
+  Future<void> getSubtitles(String videoUrl, {bool append = false}) async {
     try {
-      final captionScraper = YouTubeCaptionScraper();
+      List<SubtitleLine> subtitles = [];
+
       final captionTracks = await captionScraper.getCaptionTracks(videoUrl);
 
       subtitles = await captionScraper.getSubtitles(captionTracks[0]);
 
-      findByTheWord(wordEditingController.text);
-    } catch (_) {
-      const snackBar = SnackBar(content: Text('Something went wrong'));
-
-      ScaffoldMessenger.of(context).showSnackBar(snackBar);
+      findByTheWord(wordEditingController.text, videoUrl, subtitles, append: append);
+    } catch (e) {
+      setState(() {
+        errors++;
+      });
     }
   }
 
-  void findByTheWord(String word) {
-    finds = [];
+  void findByTheWord(String word, String url, List<SubtitleLine> subtitles, {bool append = false}) {
+    if (!append) {
+      finds = [];
+    }
+
     if (subtitles.isEmpty) {
       return;
     }
 
-    for (var item in subtitles) {
-      if (item.text.contains(word)) {
-        time.add(_formatDuration(item.start));
-        finds.add(item.text);
+    for (int index = 0; index < subtitles.length; index++) {
+      if (subtitles[index].text.contains(word)) {
+        ListItem listitem = ListItem(
+          time: _formatDuration(subtitles[index].start),
+          find: (index + 1) > subtitles.length
+              ? subtitles[index].text
+              : '${subtitles[index].text} ${subtitles[index + 1].text} ${subtitles[index + 2].text} ${subtitles[index + 3].text}',
+          url: url,
+        );
+
+        setState(() {
+          finds.add(listitem);
+        });
       }
     }
+  }
 
-    setState(() {});
+  void readExcelFile() async {
+    setState(() {
+      errors = 0;
+      isLoading = true;
+    });
+    FilePickerResult? pickedFile = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+      allowMultiple: false,
+    );
+
+    if (pickedFile != null && pickedFile.files.first.path != null) {
+      File file = File(pickedFile.files.first.path!);
+
+      var bytes = file.readAsBytesSync();
+
+      var excel = Excel.decodeBytes(bytes);
+      for (var table in excel.tables.keys) {
+        for (var row in excel.tables[table]!.rows) {
+          if (row.last!.value != null) {
+            await getSubtitles(row.last!.value.toString(), append: true);
+          }
+        }
+      }
+
+      setState(() {
+        isLoading = false;
+      });
+    }
   }
 
   @override
@@ -68,70 +116,133 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(8.0),
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              TextField(
-                controller: searchEditingController,
-                decoration: InputDecoration(
-                  hintText: 'url',
-                ),
+        child: Column(
+          children: [
+            TextField(
+              controller: searchEditingController,
+              readOnly: isLoading ? true : false,
+              decoration: InputDecoration(
+                hintText: 'url',
               ),
-              TextField(
-                controller: wordEditingController,
-                decoration: InputDecoration(
-                  hintText: 'word',
-                ),
+            ),
+            TextField(
+              controller: wordEditingController,
+              readOnly: isLoading ? true : false,
+              decoration: InputDecoration(
+                hintText: 'word',
               ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: ElevatedButton(
-                  onPressed: () async {
-                    setState(() {
-                      isLoading = true;
-                    });
+            ),
+            isLoading
+                ? LinearProgressIndicator()
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            setState(() {
+                              isLoading = true;
+                            });
 
-                    if (searchEditingController.text.isEmpty) {
-                      setState(() {
-                        isLoading = false;
-                      });
-                      return;
-                    }
+                            if (searchEditingController.text.isEmpty) {
+                              setState(() {
+                                isLoading = false;
+                              });
+                              return;
+                            }
 
-                    String url = searchEditingController.text;
+                            String url = searchEditingController.text;
 
-                    await getSubtitles(url).then(
-                      (value) {
-                        setState(() {
-                          isLoading = false;
-                        });
-                      },
-                    );
-                  },
-                  child: Icon(Icons.search),
-                ),
-              ),
-              isLoading
-                  ? CircularProgressIndicator()
-                  : Column(
-                      children: [
-                        if (finds.isEmpty) Text('nothing found'),
-                        if (finds.isNotEmpty)
-                          for (int index = 0; index < finds.length; index++)
-                            Padding(
-                              padding: const EdgeInsets.only(left: 20),
-                              child: Row(
-                                children: [
-                                  Text(time[index]),
-                                  SizedBox(width: 10),
-                                  Text(finds[index]),
-                                ],
-                              ),
+                            await getSubtitles(url).then(
+                              (value) {
+                                setState(() {
+                                  isLoading = false;
+                                });
+                              },
+                            );
+                          },
+                          child: Icon(Icons.search),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            if (wordEditingController.text.isEmpty) {
+                              var snackBar = SnackBar(
+                                content: Text('Write a word for a search'),
+                                duration: Duration(seconds: 1),
+                              );
+
+                              ScaffoldMessenger.of(context).showSnackBar(snackBar);
+                              return;
+                            }
+
+                            readExcelFile();
+                          },
+                          child: Icon(Icons.file_copy),
+                        ),
+                      ),
+                    ],
+                  ),
+            if (errors > 0) Text('Errors $errors'),
+            Expanded(
+              child: ListView.builder(
+                itemCount: finds.length,
+                itemBuilder: (context, index) {
+                  return Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: finds[index].receivedAMistake
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Error: ${finds[index].error}'),
+                                GestureDetector(
+                                  onTap: () async {
+                                    await Clipboard.setData(ClipboardData(text: finds[index].url));
+                                    var snackBar = SnackBar(
+                                      content: Text('copied to clipboard'),
+                                      duration: Duration(milliseconds: 500),
+                                    );
+
+                                    ScaffoldMessenger.of(context).showSnackBar(snackBar);
+                                  },
+                                  child: Text(finds[index].url),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Time: ${finds[index].time}'),
+                                Text('Text: ${finds[index].find}'),
+                                Row(
+                                  children: [
+                                    Text('URL: '),
+                                    GestureDetector(
+                                      onTap: () async {
+                                        await Clipboard.setData(ClipboardData(text: finds[index].url));
+                                        var snackBar = SnackBar(
+                                          content: Text('copied to clipboard'),
+                                          duration: Duration(milliseconds: 500),
+                                        );
+
+                                        ScaffoldMessenger.of(context).showSnackBar(snackBar);
+                                      },
+                                      child: Text(finds[index].url),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
-                      ],
                     ),
-            ],
-          ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
