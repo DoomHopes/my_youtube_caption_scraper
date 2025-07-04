@@ -1,18 +1,17 @@
 // ignore_for_file: use_build_context_synchronously
 
 import 'dart:io';
-
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:my_youtube_caption_scraper/list_item.dart';
+import 'package:talker_flutter/talker_flutter.dart';
 import 'package:youtube_caption_scraper/youtube_caption_scraper.dart';
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
-
   final String title;
 
   @override
@@ -21,102 +20,95 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   bool isLoading = false;
-  final captionScraper = YouTubeCaptionScraper();
-
-  TextEditingController searchEditingController = TextEditingController();
-  TextEditingController wordEditingController = TextEditingController();
-  List<ListItem> finds = [];
-  int errors = 0;
   bool isStopped = false;
+  int errors = 0;
+
+  late final Talker talker;
+
+  final captionScraper = YouTubeCaptionScraper();
+  final searchEditingController = TextEditingController();
+  final wordEditingController = TextEditingController();
+  List<ListItem> finds = [];
+  List<String> errorsList = [];
 
   String _formatDuration(Duration duration) {
-    return '${duration.inHours}:'
-        '${duration.inMinutes.remainder(60)}:'
-        '${duration.inSeconds.remainder(60)}:'
-        '${duration.inMilliseconds.remainder(60)}';
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = twoDigits(duration.inHours);
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    final ms = (duration.inMilliseconds % 1000).toString().padLeft(3, '0');
+    return '$hours:$minutes:$seconds.$ms';
   }
 
   Future<void> getSubtitles(String videoUrl, {bool append = false}) async {
-    if (isStopped) {
-      return;
-    }
-
+    if (isStopped) return;
     try {
-      List<SubtitleLine> subtitles = [];
-
       final captionTracks = await captionScraper.getCaptionTracks(videoUrl);
-
-      subtitles = await captionScraper.getSubtitles(captionTracks[0]);
-
-      findByTheWord(wordEditingController.text, videoUrl, subtitles, append: append);
-    } catch (e) {
+      final subtitles = await captionScraper.getSubtitles(captionTracks.first);
+      _findByTheWord(wordEditingController.text, videoUrl, subtitles, append: append);
+    } catch (e, st) {
       setState(() {
         errors++;
+        errorsList.add(e.toString());
       });
-      var snackBar = SnackBar(
-        content: Text(e.toString()),
-        duration: Duration(seconds: 1),
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(snackBar);
+      talker.handle(e, st);
     }
   }
 
-  void findByTheWord(String word, String url, List<SubtitleLine> subtitles, {bool append = false}) {
-    if (!append) {
-      finds = [];
-    }
+  void _findByTheWord(String word, String url, List<SubtitleLine> subtitles, {bool append = false}) {
+    if (!append) finds = [];
+    if (subtitles.isEmpty) return;
 
-    if (subtitles.isEmpty) {
-      return;
-    }
-
+    final newFinds = <ListItem>[];
     for (int index = 0; index < subtitles.length; index++) {
       if (subtitles[index].text.contains(word)) {
-        ListItem listitem = ListItem(
-          time: _formatDuration(subtitles[index].start),
-          find: (index + 1) > subtitles.length
-              ? subtitles[index].text
-              : '${subtitles[index].text} ${subtitles[index + 1].text} ${subtitles[index + 2].text} ${subtitles[index + 3].text}',
-          url: url,
-        );
+        final nextTexts = List.generate(
+          3,
+          (i) => (index + i + 1) < subtitles.length ? subtitles[index + i + 1].text : '',
+        ).join(' ');
 
-        setState(() {
-          finds.add(listitem);
-        });
+        newFinds.add(
+          ListItem(
+            time: _formatDuration(subtitles[index].start),
+            find: '${subtitles[index].text} $nextTexts',
+            url: url,
+          ),
+        );
       }
     }
+    setState(() {
+      finds.addAll(newFinds);
+    });
   }
 
-  void readExcelFile() async {
+  Future<void> readExcelFile() async {
     setState(() {
       errors = 0;
       isLoading = true;
       isStopped = false;
     });
-    FilePickerResult? pickedFile = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-      allowMultiple: false,
-    );
-
-    if (pickedFile != null && pickedFile.files.first.path != null) {
-      File file = File(pickedFile.files.first.path!);
-
-      var bytes = file.readAsBytesSync();
-
-      var excel = Excel.decodeBytes(bytes);
-      for (var table in excel.tables.keys) {
-        for (var row in excel.tables[table]!.rows) {
-          if (row.last!.value != null) {
-            await getSubtitles(row.last!.value.toString(), append: true);
+    try {
+      final pickedFile = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+        allowMultiple: false,
+      );
+      if (pickedFile?.files.first.path != null) {
+        final file = File(pickedFile!.files.first.path!);
+        final bytes = await file.readAsBytes();
+        final excel = Excel.decodeBytes(bytes);
+        for (var table in excel.tables.values) {
+          for (var row in table.rows) {
+            final url = row.last?.value?.toString();
+            if (url != null) {
+              await getSubtitles(url, append: true);
+            }
           }
         }
       }
-
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) setState(() => isLoading = false);
+    } catch (e, st) {
+      talker.handle(e, st);
     }
   }
 
@@ -127,155 +119,156 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   @override
+  void initState() {
+    talker = TalkerFlutter.init();
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    searchEditingController.dispose();
+    wordEditingController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
+        actions: [
+          IconButton(
+            onPressed: () {
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (context) => TalkerScreen(talker: talker),
+              ));
+            },
+            icon: Icon(Symbols.logo_dev),
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(8.0),
         child: Column(
           children: [
-            TextField(
-              controller: searchEditingController,
-              readOnly: isLoading ? true : false,
-              decoration: InputDecoration(
-                hintText: 'url',
+            _buildTextField(searchEditingController, 'url'),
+            _buildTextField(wordEditingController, 'word'),
+            if (isLoading) ...[
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: ElevatedButton(
+                  onPressed: stop,
+                  child: const Icon(Symbols.stop),
+                ),
               ),
-            ),
-            TextField(
-              controller: wordEditingController,
-              readOnly: isLoading ? true : false,
-              decoration: InputDecoration(
-                hintText: 'word',
-              ),
-            ),
-            isLoading
-                ? Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        stop();
-                      },
-                      child: Icon(Symbols.stop),
-                    ),
-                  )
-                : const SizedBox(),
-            isLoading
-                ? LinearProgressIndicator()
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            setState(() {
-                              isLoading = true;
-                              isStopped = false;
-                            });
-
-                            if (searchEditingController.text.isEmpty) {
-                              setState(() {
-                                isLoading = false;
-                              });
-                              return;
-                            }
-
-                            String url = searchEditingController.text;
-
-                            await getSubtitles(url).then(
-                              (value) {
-                                setState(() {
-                                  isLoading = false;
-                                });
-                              },
-                            );
-                          },
-                          child: Icon(Symbols.search),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            if (wordEditingController.text.isEmpty) {
-                              var snackBar = SnackBar(
-                                content: Text('Write a word for a search'),
-                                duration: Duration(seconds: 1),
-                              );
-
-                              ScaffoldMessenger.of(context).showSnackBar(snackBar);
-                              return;
-                            }
-
-                            readExcelFile();
-                          },
-                          child: Icon(Symbols.file_copy),
-                        ),
-                      ),
-                    ],
-                  ),
+              const LinearProgressIndicator(),
+            ] else
+              _buildActionButtons(),
             if (errors > 0) Text('Errors $errors'),
-            Expanded(
-              child: ListView.builder(
-                itemCount: finds.length,
-                itemBuilder: (context, index) {
-                  return Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: finds[index].receivedAMistake
-                          ? Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Error: ${finds[index].error}'),
-                                GestureDetector(
-                                  onTap: () async {
-                                    await Clipboard.setData(ClipboardData(text: finds[index].url));
-                                    var snackBar = SnackBar(
-                                      content: Text('copied to clipboard'),
-                                      duration: Duration(milliseconds: 500),
-                                    );
-
-                                    ScaffoldMessenger.of(context).showSnackBar(snackBar);
-                                  },
-                                  child: Text(finds[index].url),
-                                ),
-                              ],
-                            )
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Time: ${finds[index].time}'),
-                                Text('Text: ${finds[index].find}'),
-                                Row(
-                                  children: [
-                                    Text('URL: '),
-                                    GestureDetector(
-                                      onTap: () async {
-                                        await Clipboard.setData(ClipboardData(text: finds[index].url));
-                                        var snackBar = SnackBar(
-                                          content: Text('copied to clipboard'),
-                                          duration: Duration(milliseconds: 500),
-                                        );
-
-                                        ScaffoldMessenger.of(context).showSnackBar(snackBar);
-                                      },
-                                      child: Text(finds[index].url),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                    ),
-                  );
-                },
-              ),
-            ),
+            Expanded(child: _buildFindsList()),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildTextField(TextEditingController controller, String hint) {
+    return TextField(
+      controller: controller,
+      readOnly: isLoading,
+      decoration: InputDecoration(hintText: hint),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: ElevatedButton(
+            onPressed: () async {
+              setState(() {
+                isLoading = true;
+                isStopped = false;
+              });
+              if (searchEditingController.text.isEmpty) {
+                setState(() => isLoading = false);
+                return;
+              }
+              await getSubtitles(searchEditingController.text);
+              if (mounted) setState(() => isLoading = false);
+            },
+            child: const Icon(Symbols.search),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: ElevatedButton(
+            onPressed: () {
+              if (wordEditingController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Write a word for a search'), duration: Duration(seconds: 1)),
+                );
+                return;
+              }
+              readExcelFile();
+            },
+            child: const Icon(Symbols.file_copy),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFindsList() {
+    return ListView.builder(
+      itemCount: finds.length,
+      itemBuilder: (context, index) {
+        final item = finds[index];
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: item.receivedAMistake
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Error: ${item.error}'),
+                      GestureDetector(
+                        onTap: () => _copyToClipboard(item.url),
+                        child: Text(item.url),
+                      ),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Time: ${item.time}'),
+                      Text('Text: ${item.find}'),
+                      Row(
+                        children: [
+                          const Text('URL: '),
+                          GestureDetector(
+                            onTap: () => _copyToClipboard(item.url),
+                            child: Text(item.url),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _copyToClipboard(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('copied to clipboard'), duration: Duration(milliseconds: 500)),
+      );
+    }
   }
 }

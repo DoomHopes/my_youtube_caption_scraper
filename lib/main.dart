@@ -12,6 +12,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'My Youtube Caption Scraper',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(),
       home: const MyHomePage(title: 'My Youtube Caption Scraper'),
     );
