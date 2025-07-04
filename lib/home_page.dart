@@ -6,6 +6,7 @@ import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:my_youtube_caption_scraper/list_item.dart';
 import 'package:youtube_caption_scraper/youtube_caption_scraper.dart';
 
@@ -26,6 +27,7 @@ class _MyHomePageState extends State<MyHomePage> {
   TextEditingController wordEditingController = TextEditingController();
   List<ListItem> finds = [];
   int errors = 0;
+  bool isStopped = false;
 
   String _formatDuration(Duration duration) {
     return '${duration.inHours}:'
@@ -35,6 +37,10 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> getSubtitles(String videoUrl, {bool append = false}) async {
+    if (isStopped) {
+      return;
+    }
+
     try {
       List<SubtitleLine> subtitles = [];
 
@@ -47,6 +53,12 @@ class _MyHomePageState extends State<MyHomePage> {
       setState(() {
         errors++;
       });
+      var snackBar = SnackBar(
+        content: Text(e.toString()),
+        duration: Duration(seconds: 1),
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(snackBar);
     }
   }
 
@@ -80,6 +92,7 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       errors = 0;
       isLoading = true;
+      isStopped = false;
     });
     FilePickerResult? pickedFile = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -105,6 +118,12 @@ class _MyHomePageState extends State<MyHomePage> {
         isLoading = false;
       });
     }
+  }
+
+  void stop() {
+    setState(() {
+      isStopped = true;
+    });
   }
 
   @override
@@ -133,6 +152,17 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             isLoading
+                ? Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        stop();
+                      },
+                      child: Icon(Symbols.stop),
+                    ),
+                  )
+                : const SizedBox(),
+            isLoading
                 ? LinearProgressIndicator()
                 : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -143,6 +173,7 @@ class _MyHomePageState extends State<MyHomePage> {
                           onPressed: () async {
                             setState(() {
                               isLoading = true;
+                              isStopped = false;
                             });
 
                             if (searchEditingController.text.isEmpty) {
@@ -162,7 +193,7 @@ class _MyHomePageState extends State<MyHomePage> {
                               },
                             );
                           },
-                          child: Icon(Icons.search),
+                          child: Icon(Symbols.search),
                         ),
                       ),
                       Padding(
@@ -181,7 +212,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
                             readExcelFile();
                           },
-                          child: Icon(Icons.file_copy),
+                          child: Icon(Symbols.file_copy),
                         ),
                       ),
                     ],

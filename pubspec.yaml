@@ -34,6 +34,7 @@ dependencies:
   http: ^1.3.0
   file_picker: ^10.1.0
   excel: ^4.0.6
+  material_symbols_icons: ^4.2815.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
