@@ -5,20 +5,23 @@ import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:my_youtube_caption_scraper/list_item.dart';
+import 'package:my_youtube_caption_scraper/home/list_item.dart';
+import 'package:my_youtube_caption_scraper/home/web_view.dart';
+import 'package:my_youtube_caption_scraper/service/snackbar_service.dart';
 import 'package:talker_flutter/talker_flutter.dart';
 import 'package:youtube_caption_scraper/youtube_caption_scraper.dart';
 
-class MyHomePage extends StatefulWidget {
+class MyHomePage extends ConsumerStatefulWidget {
   const MyHomePage({super.key, required this.title});
   final String title;
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  ConsumerState<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends ConsumerState<MyHomePage> {
   bool isLoading = false;
   bool isStopped = false;
   int errors = 0;
@@ -189,6 +192,19 @@ class _MyHomePageState extends State<MyHomePage> {
           padding: const EdgeInsets.all(8.0),
           child: ElevatedButton(
             onPressed: () async {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => WebView(talker: talker),
+                ),
+              );
+            },
+            child: const Icon(Symbols.web),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: ElevatedButton(
+            onPressed: () async {
               setState(() {
                 isLoading = true;
                 isStopped = false;
@@ -208,9 +224,8 @@ class _MyHomePageState extends State<MyHomePage> {
           child: ElevatedButton(
             onPressed: () {
               if (wordEditingController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Write a word for a search'), duration: Duration(seconds: 1)),
-                );
+                ref.read(snackbarService).showMessage('Write a word for a search');
+
                 return;
               }
               readExcelFile();
@@ -266,9 +281,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void _copyToClipboard(String text) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('copied to clipboard'), duration: Duration(milliseconds: 500)),
-      );
+      ref.read(snackbarService).showMessage('copied to clipboard');
     }
   }
 }
